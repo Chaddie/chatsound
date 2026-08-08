@@ -3,12 +3,16 @@ import type { AccentPreset } from './accents';
 
 const CUSTOM_VOICES_KEY = 'chadsound-custom-voices';
 
+export type VoiceProvider = 'elevenlabs' | 'xai';
+
 export type SavedCustomVoice = {
   voiceId: string;
   label: string;
   language: string;
   accent?: string;
   createdAt: number;
+  /** Voice clone / TTS backend. Defaults to elevenlabs for new clones. */
+  provider?: VoiceProvider;
 };
 
 export async function loadCustomVoices(): Promise<SavedCustomVoice[]> {
@@ -29,5 +33,6 @@ export function customVoiceToPreset(v: SavedCustomVoice): AccentPreset {
     styleHint: 'Speak naturally in the cloned voice — match the delivery of the reference recording.',
     tag: 'MINE',
     custom: true,
+    provider: v.provider ?? 'elevenlabs',
   };
 }

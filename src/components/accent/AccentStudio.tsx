@@ -55,6 +55,7 @@ export function AccentStudio() {
   const positionBeat = useStudio((s) => s.positionBeat);
   const setStatus = useStudio((s) => s.setStatus);
   const ttsConfigured = useStudio((s) => s.ttsConfigured);
+  const cloneConfigured = useStudio((s) => s.cloneConfigured);
   const tracks = useStudio((s) => s.tracks);
 
   const customPresets = customVoices.map(customVoiceToPreset);
@@ -125,16 +126,13 @@ export function AccentStudio() {
     }
     setError(null);
     setBusy('clone');
-    setStatus('Cloning your voice with Grok…');
+    setStatus('Cloning your voice with ElevenLabs…');
     try {
       const form = new FormData();
       form.append('file', pendingBlob, 'reference.wav');
       form.append('name', voiceName.trim() || 'My Voice');
       form.append('language', voiceLang.trim() || 'en');
       form.append('accent', voiceAccent.trim());
-      form.append('tone', 'expressive');
-      form.append('use_case', 'entertainment');
-      form.append('gender', 'neutral');
 
       const res = await fetch('/api/voices', { method: 'POST', body: form });
       const data = (await res.json().catch(() => null)) as {
@@ -142,6 +140,7 @@ export function AccentStudio() {
         name?: string;
         language?: string;
         accent?: string;
+        provider?: string;
         error?: string;
         hint?: string;
         detail?: unknown;
@@ -162,12 +161,13 @@ export function AccentStudio() {
         language: data.language || voiceLang || 'en',
         accent: data.accent || voiceAccent || undefined,
         createdAt: Date.now(),
+        provider: 'elevenlabs',
       };
       const next = [saved, ...customVoices.filter((v) => v.voiceId !== saved.voiceId)];
       await persistCustoms(next);
       setPresetId(`custom_${saved.voiceId}`);
       setPendingBlob(null);
-      setStatus(`Voice cloned — “${saved.label}” is ready for TTS`);
+      setStatus(`Voice cloned on ElevenLabs — “${saved.label}” is ready for TTS`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Clone failed';
       setError(msg);
@@ -178,23 +178,24 @@ export function AccentStudio() {
   };
 
   const addPastedVoice = async () => {
-    const id = pasteId.trim().toLowerCase();
-    if (!/^[a-z0-9]{6,12}$/.test(id)) {
-      setError('Paste a valid xAI voice_id (from console or API)');
+    const id = pasteId.trim();
+    if (!/^[a-zA-Z0-9_-]{10,64}$/.test(id)) {
+      setError('Paste a valid ElevenLabs voice_id from your Voices library');
       return;
     }
     const saved: SavedCustomVoice = {
       voiceId: id,
-      label: voiceName.trim() || `Voice ${id}`,
+      label: voiceName.trim() || `Voice ${id.slice(0, 8)}`,
       language: voiceLang || 'en',
       accent: voiceAccent || undefined,
       createdAt: Date.now(),
+      provider: 'elevenlabs',
     };
     const next = [saved, ...customVoices.filter((v) => v.voiceId !== id)];
     await persistCustoms(next);
     setPresetId(`custom_${id}`);
     setPasteId('');
-    setStatus(`Added custom voice ${id}`);
+    setStatus(`Added ElevenLabs voice ${id}`);
   };
 
   const removeCustom = async (voiceId: string) => {
@@ -248,6 +249,7 @@ export function AccentStudio() {
     );
     try {
       const text = buildTtsText(lyrics, preset);
+      const provider = preset.custom || preset.provider === 'elevenlabs' ? 'elevenlabs' : 'xai';
       const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -255,6 +257,7 @@ export function AccentStudio() {
           text,
           voice_id: preset.voiceId,
           language: preset.language,
+          provider,
         }),
       });
 
@@ -289,21 +292,26 @@ export function AccentStudio() {
 
   return (
     <div className="accent-form">
-      <p className="panel-title">Accent Studio · Grok</p>
+      <p className="panel-title">Accent Studio · Grok + ElevenLabs</p>
 
       {ttsConfigured === false && (
         <div className="hint-box">
-          Add your xAI key to unlock AI lyrics, vocals, and voice clone. Set{' '}
-          <code>XAI_API_KEY</code> in Vercel env (hosted) or local <code>.env</code>, then restart /
-          redeploy.
+          Add <code>XAI_API_KEY</code> for AI lyrics and stock accent TTS (Vercel env or local{' '}
+          <code>.env</code>).
+        </div>
+      )}
+      {cloneConfigured === false && (
+        <div className="hint-box">
+          Add <code>ELEVENLABS_API_KEY</code> to unlock Instant Voice Cloning + speak-in-your-voice
+          TTS.
         </div>
       )}
 
       <div className="clone-panel">
-        <p className="panel-title">Clone your voice</p>
+        <p className="panel-title">Clone your voice · ElevenLabs</p>
         <p className="sample-meta">
-          Record 30–120s in a quiet room (one speaker). Read naturally — Grok clones your timbre +
-          delivery, then you can TTS any lyrics in your voice.
+          Record a clear solo take (a few seconds to a couple minutes). ElevenLabs Instant Voice Clone
+          learns your timbre, then you can TTS any lyrics in your voice.
         </p>
 
         <label className="field" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
@@ -371,17 +379,17 @@ export function AccentStudio() {
         <button
           type="button"
           className={`btn btn-primary ${busy === 'clone' ? 'generating' : ''}`}
-          disabled={busy !== null || !pendingBlob}
+          disabled={busy !== null || !pendingBlob || cloneConfigured === false}
           onClick={() => void cloneVoice()}
         >
-          {busy === 'clone' ? 'Cloning…' : 'Clone voice for TTS'}
+          {busy === 'clone' ? 'Cloning…' : 'Clone with ElevenLabs'}
         </button>
 
         <div className="field" style={{ marginTop: 4 }}>
           <input
             value={pasteId}
             onChange={(e) => setPasteId(e.target.value)}
-            placeholder="Or paste xAI voice_id"
+            placeholder="Or paste ElevenLabs voice_id"
             aria-label="Paste voice id"
           />
           <button type="button" className="btn" onClick={() => void addPastedVoice()}>
@@ -495,7 +503,11 @@ export function AccentStudio() {
       <button
         type="button"
         className={`btn btn-primary ${busy === 'voice' ? 'generating' : ''}`}
-        disabled={busy !== null || !lyrics.trim()}
+        disabled={
+          busy !== null ||
+          !lyrics.trim() ||
+          (preset.custom ? cloneConfigured === false : ttsConfigured === false)
+        }
         onClick={() => void generate()}
       >
         {busy === 'voice'

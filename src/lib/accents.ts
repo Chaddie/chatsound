@@ -8,6 +8,7 @@ export interface AccentPreset {
   styleHint: string;
   tag: string;
   custom?: boolean;
+  provider?: 'elevenlabs' | 'xai';
 }
 
 export const ACCENT_PRESETS: AccentPreset[] = [
@@ -87,6 +88,10 @@ export const ACCENT_PRESETS: AccentPreset[] = [
 
 export function buildTtsText(lyrics: string, preset: AccentPreset): string {
   const trimmed = lyrics.trim();
+  // ElevenLabs: speak lyrics as-written (strip xAI-style coaching tags if present).
+  if (preset.provider === 'elevenlabs' || preset.custom) {
+    return trimmed.replace(/\[(?:pause|whisper|laugh)\]/gi, ' ').replace(/\s+/g, ' ').trim();
+  }
   // Keep style coaching out of spoken text when possible; rely on language + voice.
   // For expressive tags, allow user tags to pass through; prepend a short pause for studio feel.
   if (preset.id === 'tokyo' && !trimmed.includes('[')) {

@@ -9,10 +9,18 @@ function readEnv(name: string): string | undefined {
 }
 
 const XAI_MODEL = readEnv('XAI_MODEL') ?? 'grok-3';
+const ELEVEN_BASE = (readEnv('ELEVENLABS_API_BASE') ?? 'https://api.elevenlabs.io').replace(/\/$/, '');
+const ELEVEN_TTS_MODEL = readEnv('ELEVENLABS_TTS_MODEL') ?? 'eleven_multilingual_v2';
 
 export function apiKey(): string | null {
   const key = readEnv('XAI_API_KEY');
   if (!key || key === 'your_xai_api_key_here') return null;
+  return key;
+}
+
+export function elevenLabsKey(): string | null {
+  const key = readEnv('ELEVENLABS_API_KEY');
+  if (!key || key === 'your_elevenlabs_api_key_here') return null;
   return key;
 }
 
@@ -32,13 +40,81 @@ export function createApp(options?: { collab?: boolean }) {
     c.json({
       ok: true,
       ttsConfigured: Boolean(apiKey()),
+      xaiConfigured: Boolean(apiKey()),
+      elevenLabsConfigured: Boolean(elevenLabsKey()),
+      cloneConfigured: Boolean(elevenLabsKey()),
       model: XAI_MODEL,
+      elevenLabsModel: ELEVEN_TTS_MODEL,
       collab,
       hosting: collab ? 'local' : 'vercel',
     }),
   );
 
   app.post('/api/tts', async (c) => {
+    let body: {
+      text?: string;
+      voice_id?: string;
+      language?: string;
+      provider?: 'xai' | 'elevenlabs';
+    };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const text = body.text?.trim();
+    if (!text) return c.json({ error: 'text is required' }, 400);
+
+    const voiceId = body.voice_id?.trim();
+    const useEleven =
+      body.provider === 'elevenlabs' ||
+      (body.provider !== 'xai' && Boolean(voiceId && voiceId.length > 12 && elevenLabsKey()));
+
+    if (useEleven) {
+      const key = elevenLabsKey();
+      if (!key) {
+        return c.json(
+          {
+            error: 'ELEVENLABS_API_KEY not configured',
+            hint: 'Set ELEVENLABS_API_KEY in Vercel env or local .env for voice clones',
+          },
+          503,
+        );
+      }
+      if (!voiceId) return c.json({ error: 'voice_id is required for ElevenLabs TTS' }, 400);
+
+      const res = await fetch(
+        `${ELEVEN_BASE}/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+        {
+          method: 'POST',
+          headers: {
+            'xi-api-key': key,
+            'Content-Type': 'application/json',
+            Accept: 'audio/mpeg',
+          },
+          body: JSON.stringify({
+            text,
+            model_id: ELEVEN_TTS_MODEL,
+          }),
+        },
+      );
+
+      if (!res.ok) {
+        const errText = await res.text();
+        return c.json({ error: 'ElevenLabs TTS failed', detail: errText }, 502);
+      }
+
+      const audio = await res.arrayBuffer();
+      return new Response(audio, {
+        status: 200,
+        headers: {
+          'Content-Type': res.headers.get('Content-Type') ?? 'audio/mpeg',
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
     const key = apiKey();
     if (!key) {
       return c.json(
@@ -50,23 +126,9 @@ export function createApp(options?: { collab?: boolean }) {
       );
     }
 
-    let body: {
-      text?: string;
-      voice_id?: string;
-      language?: string;
-    };
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: 'Invalid JSON body' }, 400);
-    }
-
-    const text = body.text?.trim();
-    if (!text) return c.json({ error: 'text is required' }, 400);
-
     const payload = {
       text,
-      voice_id: body.voice_id ?? 'eve',
+      voice_id: voiceId ?? 'eve',
       language: body.language ?? 'en',
       output_format: {
         codec: 'mp3',
@@ -188,31 +250,44 @@ Write the lyrics now.`;
   });
 
   app.get('/api/voices', async (c) => {
-    const key = apiKey();
-    if (!key) {
-      return c.json(
-        { error: 'XAI_API_KEY not configured', hint: 'Set XAI_API_KEY in Vercel env' },
-        503,
-      );
-    }
-    const res = await fetch('https://api.x.ai/v1/custom-voices?limit=50', {
-      headers: { Authorization: `Bearer ${key}` },
-    });
-    if (!res.ok) {
-      const detail = await res.text();
-      return c.json({ error: 'Failed to list custom voices', detail, status: res.status }, 502);
-    }
-    const data = (await res.json()) as { voices?: unknown[] };
-    return c.json({ voices: data.voices ?? [] });
-  });
-
-  app.post('/api/voices', async (c) => {
-    const key = apiKey();
+    const key = elevenLabsKey();
     if (!key) {
       return c.json(
         {
-          error: 'XAI_API_KEY not configured',
-          hint: 'Set XAI_API_KEY in Vercel env',
+          error: 'ELEVENLABS_API_KEY not configured',
+          hint: 'Set ELEVENLABS_API_KEY in Vercel env or local .env',
+        },
+        503,
+      );
+    }
+    const res = await fetch(`${ELEVEN_BASE}/v1/voices`, {
+      headers: { 'xi-api-key': key },
+    });
+    if (!res.ok) {
+      const detail = await res.text();
+      return c.json({ error: 'Failed to list ElevenLabs voices', detail, status: res.status }, 502);
+    }
+    const data = (await res.json()) as {
+      voices?: { voice_id: string; name: string; category?: string; labels?: Record<string, string> }[];
+    };
+    return c.json({
+      provider: 'elevenlabs',
+      voices: (data.voices ?? []).map((v) => ({
+        voice_id: v.voice_id,
+        name: v.name,
+        category: v.category,
+        labels: v.labels,
+      })),
+    });
+  });
+
+  app.post('/api/voices', async (c) => {
+    const key = elevenLabsKey();
+    if (!key) {
+      return c.json(
+        {
+          error: 'ELEVENLABS_API_KEY not configured',
+          hint: 'Set ELEVENLABS_API_KEY in Vercel env or local .env for Instant Voice Cloning',
         },
         503,
       );
@@ -231,15 +306,12 @@ Write the lyrics now.`;
       file !== null &&
       typeof (file as Blob).arrayBuffer === 'function';
     if (!isBlob) {
-      return c.json({ error: 'file is required (audio reference, max 120s)' }, 400);
+      return c.json({ error: 'file is required (audio reference for Instant Voice Clone)' }, 400);
     }
 
     const name = String(form.get('name') ?? 'My Voice').trim() || 'My Voice';
     const language = String(form.get('language') ?? 'en').trim() || 'en';
     const accent = String(form.get('accent') ?? '').trim();
-    const tone = String(form.get('tone') ?? 'expressive').trim() || 'expressive';
-    const useCase = String(form.get('use_case') ?? 'entertainment').trim() || 'entertainment';
-    const gender = String(form.get('gender') ?? 'neutral').trim() || 'neutral';
 
     const outbound = new FormData();
     const blob = file as Blob;
@@ -247,21 +319,19 @@ Write the lyrics now.`;
       'name' in blob && typeof (blob as File).name === 'string' && (blob as File).name
         ? (blob as File).name
         : 'reference.wav';
-    outbound.append('file', blob, filename);
+    outbound.append('files', blob, filename);
     outbound.append('name', name.slice(0, 64));
-    outbound.append('language', language);
-    outbound.append('tone', tone);
-    outbound.append('use_case', useCase);
-    outbound.append('gender', gender);
-    if (accent) outbound.append('accent', accent.slice(0, 64));
     outbound.append(
       'description',
-      `Chadsound custom voice${accent ? ` · ${accent}` : ''} · cloned for Accent Studio TTS`,
+      `Chadsound Instant Voice Clone${accent ? ` · ${accent}` : ''}`,
     );
+    const labels: Record<string, string> = { language };
+    if (accent) labels.accent = accent.slice(0, 64);
+    outbound.append('labels', JSON.stringify(labels));
 
-    const res = await fetch('https://api.x.ai/v1/custom-voices', {
+    const res = await fetch(`${ELEVEN_BASE}/v1/voices/add`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}` },
+      headers: { 'xi-api-key': key },
       body: outbound,
     });
 
@@ -275,14 +345,14 @@ Write the lyrics now.`;
 
     if (!res.ok) {
       const hint =
-        res.status === 403
-          ? 'Custom voice create via API may require Enterprise. Clone in the xAI console and paste the voice ID.'
+        res.status === 401 || res.status === 403
+          ? 'Check ELEVENLABS_API_KEY and that your plan includes Instant Voice Cloning (Starter+).'
           : res.status === 400
-            ? 'Check the clip is under 120 seconds, one speaker, quiet room. Aim for 30–120s of natural speech.'
+            ? 'Use a clear solo reference clip (a few seconds to a couple minutes). Quiet room, one speaker.'
             : undefined;
       return c.json(
         {
-          error: 'Voice clone failed',
+          error: 'ElevenLabs voice clone failed',
           detail: parsed,
           hint,
           status: res.status,
@@ -291,24 +361,34 @@ Write the lyrics now.`;
       );
     }
 
-    return c.json(parsed, 201);
+    return c.json(
+      {
+        provider: 'elevenlabs',
+        voice_id: parsed.voice_id,
+        name,
+        language,
+        accent: accent || undefined,
+        requires_verification: parsed.requires_verification,
+      },
+      201,
+    );
   });
 
   app.delete('/api/voices/:voiceId', async (c) => {
-    const key = apiKey();
+    const key = elevenLabsKey();
     if (!key) {
-      return c.json({ error: 'XAI_API_KEY not configured' }, 503);
+      return c.json({ error: 'ELEVENLABS_API_KEY not configured' }, 503);
     }
     const voiceId = c.req.param('voiceId');
-    const res = await fetch(`https://api.x.ai/v1/custom-voices/${encodeURIComponent(voiceId)}`, {
+    const res = await fetch(`${ELEVEN_BASE}/v1/voices/${encodeURIComponent(voiceId)}`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${key}` },
+      headers: { 'xi-api-key': key },
     });
     if (!res.ok) {
       const detail = await res.text();
       return c.json({ error: 'Delete failed', detail }, 502);
     }
-    return c.json({ deleted: true });
+    return c.json({ deleted: true, provider: 'elevenlabs' });
   });
 
   return app;

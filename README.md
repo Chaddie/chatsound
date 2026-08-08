@@ -24,8 +24,10 @@ Projects/sessions save in the **browser (IndexedDB)** — no database required.
 
 Env vars:
 
-- `XAI_API_KEY` — lyrics, TTS, voice clone  
+- `XAI_API_KEY` — AI lyrics + stock accent TTS  
 - `XAI_MODEL` — optional (default `grok-3`)  
+- `ELEVENLABS_API_KEY` — Instant Voice Cloning + speak-in-your-voice TTS  
+- `ELEVENLABS_API_BASE` — optional (default `https://api.elevenlabs.io`)  
 - `VITE_PARTYKIT_HOST` — Workers host after collab deploy (e.g. `chatsound-collab.<account>.workers.dev`)
 
 ### Cloudflare (live share)

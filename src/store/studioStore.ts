@@ -128,8 +128,10 @@ interface StudioState {
   leftTab: 'samples' | 'accent';
   exporting: boolean;
   statusMessage: string | null;
-  /** null = still checking; false = show setup hint; true = key present */
+  /** null = still checking; false = show setup hint; true = xAI key present (lyrics / stock TTS) */
   ttsConfigured: boolean | null;
+  /** ElevenLabs Instant Voice Cloning + clone TTS */
+  cloneConfigured: boolean | null;
   recording: boolean;
   recordStartBeat: number;
   past: ArrSnapshot[];
@@ -142,6 +144,7 @@ interface StudioState {
   setLeftTab: (tab: 'samples' | 'accent') => void;
   setStatus: (msg: string | null) => void;
   setTtsConfigured: (ready: boolean | null) => void;
+  setCloneConfigured: (ready: boolean | null) => void;
   applyRemoteSnapshot: (snap: ProjectSnapshot) => void;
   addCapturedSample: (
     name: string,
@@ -218,6 +221,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   exporting: false,
   statusMessage: null,
   ttsConfigured: null,
+  cloneConfigured: null,
   recording: false,
   recordStartBeat: 0,
   past: [],
@@ -237,6 +241,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   setLeftTab: (tab) => set({ leftTab: tab }),
   setStatus: (msg) => set({ statusMessage: msg }),
   setTtsConfigured: (ready) => set({ ttsConfigured: ready }),
+  setCloneConfigured: (ready) => set({ cloneConfigured: ready }),
   setRecording: (recording, startBeat) =>
     set({ recording, recordStartBeat: startBeat ?? get().positionBeat }),
 
@@ -309,10 +314,20 @@ export const useStudio = create<StudioState>((set, get) => ({
     // Probe AI key in parallel with sample boot (non-blocking for UI).
     void fetch('/api/health')
       .then((r) => r.json())
-      .then((d: { ttsConfigured?: boolean }) => {
-        set({ ttsConfigured: Boolean(d.ttsConfigured) });
-      })
-      .catch(() => set({ ttsConfigured: false }));
+      .then(
+        (d: {
+          ttsConfigured?: boolean;
+          xaiConfigured?: boolean;
+          elevenLabsConfigured?: boolean;
+          cloneConfigured?: boolean;
+        }) => {
+          set({
+            ttsConfigured: Boolean(d.xaiConfigured ?? d.ttsConfigured),
+            cloneConfigured: Boolean(d.cloneConfigured ?? d.elevenLabsConfigured),
+          });
+        },
+      )
+      .catch(() => set({ ttsConfigured: false, cloneConfigured: false }));
 
     // Fast path: one JSON fetch + IndexedDB — no Tone unlock, no WAV decode
     const [manifest, savedProject, savedSamples] = await Promise.all([
