@@ -1,10 +1,17 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
-const XAI_MODEL = process.env.XAI_MODEL ?? 'grok-3';
+type EnvMap = Record<string, string | undefined>;
+
+function readEnv(name: string): string | undefined {
+  const env = (globalThis as { process?: { env?: EnvMap } }).process?.env;
+  return env?.[name];
+}
+
+const XAI_MODEL = readEnv('XAI_MODEL') ?? 'grok-3';
 
 export function apiKey(): string | null {
-  const key = process.env.XAI_API_KEY;
+  const key = readEnv('XAI_API_KEY');
   if (!key || key === 'your_xai_api_key_here') return null;
   return key;
 }
@@ -219,7 +226,11 @@ Write the lyrics now.`;
     }
 
     const file = form.get('file');
-    if (!(file instanceof File) && !(file instanceof Blob)) {
+    const isBlob =
+      typeof file === 'object' &&
+      file !== null &&
+      typeof (file as Blob).arrayBuffer === 'function';
+    if (!isBlob) {
       return c.json({ error: 'file is required (audio reference, max 120s)' }, 400);
     }
 
@@ -231,8 +242,11 @@ Write the lyrics now.`;
     const gender = String(form.get('gender') ?? 'neutral').trim() || 'neutral';
 
     const outbound = new FormData();
-    const filename = file instanceof File && file.name ? file.name : 'reference.wav';
-    const blob = file instanceof Blob ? file : new Blob([file]);
+    const blob = file as Blob;
+    const filename =
+      'name' in blob && typeof (blob as File).name === 'string' && (blob as File).name
+        ? (blob as File).name
+        : 'reference.wav';
     outbound.append('file', blob, filename);
     outbound.append('name', name.slice(0, 64));
     outbound.append('language', language);
