@@ -58,7 +58,19 @@ export function base64ToBlob(base64: string, mime: string): Blob {
   return new Blob([bytes], { type: mime });
 }
 
-export function wsUrl(): string {
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${proto}//${window.location.host}/ws`;
+/** Party name for PartySocket (kebab-case of Durable Object binding). */
+export const PARTY_NAME = 'collab-server';
+
+/** PartyKit / Workers host (no protocol). Dev defaults to local wrangler; prod uses VITE_PARTYKIT_HOST. */
+export function partykitHost(): string | null {
+  const fromEnv = (import.meta.env.VITE_PARTYKIT_HOST as string | undefined)?.trim();
+  if (fromEnv) {
+    return fromEnv.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+  }
+  if (import.meta.env.DEV) return '127.0.0.1:1999';
+  return null;
+}
+
+export function collabAvailable(): boolean {
+  return Boolean(partykitHost()) || import.meta.env.DEV;
 }

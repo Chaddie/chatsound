@@ -1,12 +1,14 @@
 import { create } from 'zustand';
+import PartySocket from 'partysocket';
 import type { ProjectSnapshot, Sample } from '../types';
 import { TRACK_COLORS, uid } from '../types';
 import {
   base64ToBlob,
   blobToBase64,
   peerColor,
+  partykitHost,
+  PARTY_NAME,
   randomRoomId,
-  wsUrl,
   type ClientMessage,
   type CollabPeerInfo,
   type SamplePayload,
@@ -35,7 +37,7 @@ type CollabState = {
   broadcastTransport: () => void;
 };
 
-let socket: WebSocket | null = null;
+let socket: PartySocket | WebSocket | null = null;
 let stateTimer: ReturnType<typeof setTimeout> | null = null;
 let lastAppliedTs = 0;
 const knownSampleIds = new Set<string>();
@@ -44,6 +46,21 @@ function send(msg: ClientMessage) {
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(msg));
   }
+}
+
+function openCollabSocket(roomId: string, peerId: string): PartySocket | WebSocket {
+  const host = partykitHost();
+  if (host) {
+    return new PartySocket({
+      host,
+      room: roomId,
+      party: PARTY_NAME,
+      id: peerId,
+      maxRetries: 8,
+    });
+  }
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return new WebSocket(`${proto}//${window.location.host}/ws`);
 }
 
 function snapshotFromStudio(): ProjectSnapshot {
@@ -115,7 +132,17 @@ export const useCollab = create<CollabState>((set, get) => ({
     }
 
     const peerId = get().peerId;
-    const ws = new WebSocket(wsUrl());
+    const host = partykitHost();
+    if (!host && !import.meta.env.DEV) {
+      set({
+        lastError: 'Live share is not configured (missing VITE_PARTYKIT_HOST)',
+        syncing: false,
+      });
+      useStudio.getState().setStatus('Live share unavailable — PartyKit host not set');
+      return;
+    }
+
+    const ws = openCollabSocket(clean, peerId);
     socket = ws;
     set({
       roomId: clean,

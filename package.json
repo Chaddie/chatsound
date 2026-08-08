@@ -4,12 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n web,api -c lime,amber \"vite\" \"tsx watch server/index.ts\"",
+    "dev": "concurrently -n web,api,party -c lime,amber,cyan \"vite\" \"tsx watch server/index.ts\" \"wrangler dev --port 1999\"",
     "dev:web": "vite",
     "dev:api": "tsx watch server/index.ts",
+    "dev:party": "wrangler dev --port 1999",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "generate-samples": "tsx scripts/generate-samples.ts"
+    "generate-samples": "tsx scripts/generate-samples.ts",
+    "deploy:party": "wrangler deploy"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.4",
@@ -18,6 +20,8 @@
     "dotenv": "^17.2.1",
     "hono": "^4.8.12",
     "idb-keyval": "^6.2.2",
+    "partyserver": "^0.5.10",
+    "partysocket": "^1.3.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "tone": "^15.1.22",
@@ -32,6 +36,7 @@
     "@vitejs/plugin-react": "^5.0.0",
     "tsx": "^4.20.3",
     "typescript": "~5.9.2",
-    "vite": "^7.1.0"
+    "vite": "^7.1.0",
+    "wrangler": "^4.120.0"
   }
 }

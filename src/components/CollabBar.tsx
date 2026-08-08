@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useCollab } from '../collab/store';
-import { useStudio } from '../store/studioStore';
+import { collabAvailable } from '../collab/protocol';
 
 export function CollabBar() {
   const connected = useCollab((s) => s.connected);
@@ -15,23 +15,13 @@ export function CollabBar() {
   const leaveRoom = useCollab((s) => s.leaveRoom);
   const [open, setOpen] = useState(false);
   const [joinId, setJoinId] = useState('');
-
-  useEffect(() => {
-    void fetch('/api/health')
-      .then((r) => r.json())
-      .then((d: { collab?: boolean }) => {
-        if (d.collab === false) {
-          useStudio.getState().setStatus('Hosted mode: live share needs local API');
-        }
-      })
-      .catch(() => undefined);
-  }, []);
+  const canCollab = collabAvailable();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const room = params.get('room');
-    if (room) joinRoom(room);
-  }, [joinRoom]);
+    if (room && canCollab) joinRoom(room);
+  }, [joinRoom, canCollab]);
 
   return (
     <div className="collab-wrap">
@@ -55,6 +45,12 @@ export function CollabBar() {
       {open && (
         <div className="collab-popover">
           <p className="panel-title">Live session</p>
+          {!canCollab ? (
+            <p className="sample-meta">
+              Live share needs PartyKit. Set <code>VITE_PARTYKIT_HOST</code> and redeploy.
+            </p>
+          ) : (
+            <>
           <label className="field" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <span>Your name</span>
             <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
@@ -107,6 +103,8 @@ export function CollabBar() {
           <p className="sample-meta" style={{ marginTop: 8 }}>
             Arrangement + uploaded/recorded samples sync live. Share the link with collaborators.
           </p>
+            </>
+          )}
         </div>
       )}
     </div>
