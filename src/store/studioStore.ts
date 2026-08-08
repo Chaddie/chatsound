@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Clip, LoopRegion, ProjectSnapshot, Sample, Track } from '../types';
+import type { ArrangementPlan, Clip, LoopRegion, ProjectSnapshot, Sample, Track } from '../types';
 import { TRACK_COLORS, uid } from '../types';
 import { secondsToBeats, snapBeat, clamp } from '../lib/time';
 import { audioEngine } from '../engine/AudioEngine';
@@ -180,6 +180,7 @@ interface StudioState {
   updateTrack: (id: string, patch: Partial<Track>) => void;
 
   addClipFromSample: (sampleId: string, trackId: string, startBeat: number) => void;
+  applyArrangement: (plan: ArrangementPlan) => Promise<void>;
   commitClipEdit: (
     id: string,
     patch: { startBeat: number; durationBeats: number; offsetBeats: number; trackId?: string },
@@ -550,6 +551,63 @@ export const useStudio = create<StudioState>((set, get) => ({
     };
     set({ clips: [...get().clips, clip], selectedClipId: clip.id, selectedTrackId: trackId });
     void get().reschedule();
+    schedulePersist(get);
+  },
+
+  applyArrangement: async (plan) => {
+    get().pushHistory();
+    audioEngine.stop();
+
+    const bpm = clamp(plan.bpm || 128, 40, 240);
+    const tracks: Track[] = plan.tracks.map((t, i) => ({
+      id: uid('tr'),
+      name: t.name.slice(0, 32) || `Track ${i + 1}`,
+      color: TRACK_COLORS[i % TRACK_COLORS.length]!,
+      volume: t.role === 'drums' || t.role === 'bass' ? 0.85 : 0.75,
+      pan: 0,
+      muted: false,
+      solo: false,
+    }));
+
+    if (!tracks.length) {
+      tracks.push(...defaultTracks());
+    }
+
+    const grid = get().snap || 0.25;
+    const clips: Clip[] = [];
+    for (const cl of plan.clips) {
+      const sample = get().samples.find((s) => s.id === cl.sampleId);
+      if (!sample) continue;
+      const track = tracks[cl.trackIndex] ?? tracks[0];
+      if (!track) continue;
+      const maxDur = Math.max(grid, secondsToBeats(sample.duration, bpm));
+      const durationBeats = Math.min(maxDur, Math.max(grid, cl.durationBeats));
+      clips.push({
+        id: uid('clip'),
+        trackId: track.id,
+        sampleId: sample.id,
+        startBeat: snapBeat(Math.max(0, cl.startBeat), grid),
+        durationBeats: snapBeat(durationBeats, grid) || durationBeats,
+        offsetBeats: 0,
+      });
+    }
+
+    const endBeat = Math.max(16, ...clips.map((c) => c.startBeat + c.durationBeats), 16);
+
+    set({
+      projectName: plan.name?.slice(0, 48) || 'AI Session',
+      bpm,
+      tracks,
+      clips,
+      loop: { enabled: true, startBeat: 0, endBeat: Math.ceil(endBeat / 4) * 4 },
+      selectedTrackId: tracks[0]?.id ?? null,
+      selectedClipId: null,
+      playing: false,
+      positionBeat: 0,
+      statusMessage: `Arranged “${plan.name || 'AI Session'}” · ${clips.length} clips`,
+    });
+    audioEngine.setBpm(bpm);
+    await get().reschedule();
     schedulePersist(get);
   },
 

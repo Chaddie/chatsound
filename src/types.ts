@@ -52,6 +52,14 @@ export interface ProjectSnapshot {
   selectedClipId: string | null;
 }
 
+export type ArrangementPlan = {
+  bpm: number;
+  name: string;
+  tracks: { name: string; role: string }[];
+  clips: { sampleId: string; trackIndex: number; startBeat: number; durationBeats: number }[];
+  vocal?: { lyrics: string; style?: string } | null;
+};
+
 export const TRACK_COLORS = [
   '#c8f135',
   '#f0a830',

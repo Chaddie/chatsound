@@ -249,6 +249,210 @@ Write the lyrics now.`;
     return c.json({ lyrics, style, model: XAI_MODEL });
   });
 
+  const KIT_SAMPLE_IDS = [
+    'kick',
+    'kick_808',
+    'snare',
+    'snare_rim',
+    'hat',
+    'hat_open',
+    'clap',
+    'perc',
+    'tom_low',
+    'tom_high',
+    'ride',
+    'crash',
+    'shaker',
+    'bass',
+    'bass_reese',
+    'bass_acid',
+    'bass_wobble',
+    'bass_pluck',
+    'chord',
+    'synth_saw_lead',
+    'synth_square_lead',
+    'synth_pluck',
+    'synth_pad_warm',
+    'synth_pad_air',
+    'synth_keys_bell',
+    'synth_fm_stab',
+    'synth_arp',
+    'synth_supersaw',
+    'synth_pulse_width',
+    'synth_hoover',
+    'synth_chord_minor',
+    'synth_chord_maj7',
+    'guitar_e',
+    'guitar_a',
+    'guitar_d',
+    'guitar_g',
+    'guitar_b',
+    'guitar_e_high',
+    'guitar_chord_open',
+    'guitar_power_chord',
+    'guitar_mute',
+    'guitar_harmonics',
+    'piano_c3',
+    'piano_e3',
+    'piano_g3',
+    'piano_c4',
+    'piano_e4',
+    'piano_chord',
+    'epiano',
+    'organ',
+    'strings_pad',
+    'violin_lead',
+    'cello',
+    'brass_stab',
+    'trumpet',
+    'flute',
+    'sax',
+    'kalimba',
+    'marimba',
+    'steel_drum',
+    'bell_church',
+    'fx',
+    'fx_riser',
+    'fx_downlifter',
+    'fx_impact',
+    'fx_noise_hit',
+    'fx_laser',
+  ] as const;
+
+  app.post('/api/arrange', async (c) => {
+    const key = apiKey();
+    if (!key) {
+      return c.json(
+        {
+          error: 'XAI_API_KEY not configured',
+          hint: 'Set XAI_API_KEY to generate AI arrangements',
+        },
+        503,
+      );
+    }
+
+    let body: { prompt?: string; bars?: number };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const prompt = body.prompt?.trim();
+    if (!prompt) return c.json({ error: 'prompt is required' }, 400);
+    const bars = Math.min(32, Math.max(4, Number(body.bars) || 8));
+    const totalBeats = bars * 4;
+
+    const system = `You are a music producer arranging a track inside Chadsound DAW.
+Return ONLY valid JSON (no markdown fences, no commentary).
+You MUST only use sampleId values from this allow-list:
+${KIT_SAMPLE_IDS.join(', ')}
+
+Schema:
+{
+  "bpm": number (70-180),
+  "name": string (short session title),
+  "tracks": [{"name": string, "role": "drums"|"bass"|"synths"|"guitar"|"keys"|"fx"|"vox"}],
+  "clips": [{"sampleId": string, "trackIndex": number, "startBeat": number, "durationBeats": number}],
+  "vocal": {"lyrics": string, "style": "hook"|"rap"|"chorus"} | null
+}
+
+Rules:
+- trackIndex is 0-based into the tracks array.
+- Prefer 4 tracks: drums, bass, lead/synth or guitar, fx.
+- Fill ~${totalBeats} beats (about ${bars} bars). Use repeating rhythmic patterns.
+- durationBeats typically 0.25–4 for drums/hats, 1–8 for pads/bass.
+- startBeat >= 0 and startBeat + durationBeats <= ${totalBeats + 4}.
+- Match the user's genre/vibe (e.g. metal + dubstep => heavy kick_808, bass_wobble/bass_reese, guitar_power_chord, crash, fx_riser).
+- Include 12–40 clips total. Avoid empty arrangements.
+- vocal may be null; if present, keep lyrics short (4–8 lines) matching the vibe.`;
+
+    const user = `User request: ${prompt}
+
+Create the arrangement JSON now.`;
+
+    const res = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: XAI_MODEL,
+        temperature: 0.7,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return c.json({ error: 'Arrangement generation failed', detail: errText }, 502);
+    }
+
+    const data = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    let raw = data.choices?.[0]?.message?.content?.trim() ?? '';
+    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    let plan: unknown;
+    try {
+      plan = JSON.parse(raw);
+    } catch {
+      return c.json({ error: 'Model returned non-JSON arrangement', detail: raw.slice(0, 800) }, 502);
+    }
+
+    const obj = plan as {
+      bpm?: number;
+      name?: string;
+      tracks?: { name?: string; role?: string }[];
+      clips?: { sampleId?: string; trackIndex?: number; startBeat?: number; durationBeats?: number }[];
+      vocal?: { lyrics?: string; style?: string } | null;
+    };
+
+    const allow = new Set<string>(KIT_SAMPLE_IDS);
+    const tracks = (obj.tracks ?? [])
+      .slice(0, 8)
+      .map((t, i) => ({
+        name: String(t.name || `Track ${i + 1}`).slice(0, 32),
+        role: String(t.role || 'synths'),
+      }));
+
+    const clips = (obj.clips ?? [])
+      .filter((cl) => cl.sampleId && allow.has(cl.sampleId))
+      .slice(0, 64)
+      .map((cl) => ({
+        sampleId: cl.sampleId!,
+        trackIndex: Math.max(0, Math.min(tracks.length - 1, Number(cl.trackIndex) || 0)),
+        startBeat: Math.max(0, Number(cl.startBeat) || 0),
+        durationBeats: Math.max(0.125, Math.min(16, Number(cl.durationBeats) || 1)),
+      }));
+
+    if (!tracks.length || !clips.length) {
+      return c.json({ error: 'Arrangement had no usable clips', detail: obj }, 502);
+    }
+
+    const vocal =
+      obj.vocal && typeof obj.vocal.lyrics === 'string' && obj.vocal.lyrics.trim()
+        ? {
+            lyrics: obj.vocal.lyrics.trim().slice(0, 1200),
+            style: obj.vocal.style || 'hook',
+          }
+        : null;
+
+    return c.json({
+      bpm: Math.min(180, Math.max(70, Number(obj.bpm) || 128)),
+      name: String(obj.name || 'AI Session').slice(0, 48),
+      tracks,
+      clips,
+      vocal,
+      model: XAI_MODEL,
+    });
+  });
+
   app.get('/api/voices', async (c) => {
     const key = elevenLabsKey();
     if (!key) {

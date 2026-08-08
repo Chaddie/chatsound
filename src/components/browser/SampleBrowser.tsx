@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useStudio } from '../../store/studioStore';
+import type { ArrangementPlan } from '../../types';
 
 const CATEGORY_ORDER = [
   'Upload',
@@ -16,15 +17,29 @@ const CATEGORY_ORDER = [
   'Accent',
 ];
 
+const PROMPT_EXAMPLES = [
+  'metal and dubstep drop',
+  'lofi night drive',
+  'uk garage rollers',
+  'cinematic trailer hits',
+];
+
 export function SampleBrowser() {
   const samples = useStudio((s) => s.samples);
   const importFiles = useStudio((s) => s.importFiles);
   const selectedTrackId = useStudio((s) => s.selectedTrackId);
   const positionBeat = useStudio((s) => s.positionBeat);
   const addClipFromSample = useStudio((s) => s.addClipFromSample);
+  const applyArrangement = useStudio((s) => s.applyArrangement);
+  const addGeneratedSample = useStudio((s) => s.addGeneratedSample);
+  const ttsConfigured = useStudio((s) => s.ttsConfigured);
+  const setStatus = useStudio((s) => s.setStatus);
   const [dragOver, setDragOver] = useState(false);
   const [filter, setFilter] = useState<string>('All');
   const [uploading, setUploading] = useState(false);
+  const [prompt, setPrompt] = useState('metal and dubstep — heavy drop, wobble bass, crunchy guitars');
+  const [arranging, setArranging] = useState(false);
+  const [arrangeError, setArrangeError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const grouped = useMemo(() => {
@@ -65,9 +80,95 @@ export function SampleBrowser() {
     }
   };
 
+  const generateArrangement = async () => {
+    const idea = prompt.trim();
+    if (!idea) return;
+    setArrangeError(null);
+    setArranging(true);
+    setStatus('Grok is arranging your track…');
+    try {
+      const res = await fetch('/api/arrange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: idea, bars: 8 }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | (ArrangementPlan & { error?: string; hint?: string })
+        | null;
+      if (!res.ok || !data?.clips?.length) {
+        throw new Error(data?.hint || data?.error || `Arrange failed (${res.status})`);
+      }
+
+      await applyArrangement(data);
+
+      if (data.vocal?.lyrics && ttsConfigured) {
+        setStatus('Adding AI vocal hook…');
+        const tts = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: data.vocal.lyrics,
+            voice_id: 'eve',
+            language: 'en',
+            provider: 'xai',
+          }),
+        });
+        if (tts.ok) {
+          const blob = await tts.blob();
+          const sample = await addGeneratedSample('AI Hook', blob);
+          const vox =
+            useStudio.getState().tracks.find((t) => /vox|vocal/i.test(t.name)) ??
+            useStudio.getState().tracks[0];
+          if (vox) addClipFromSample(sample.id, vox.id, 0);
+          setStatus('Arrangement + vocal ready — hit play');
+        } else {
+          setStatus('Arrangement ready (vocal TTS skipped)');
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Arrange failed';
+      setArrangeError(msg);
+      setStatus(msg);
+    } finally {
+      setArranging(false);
+    }
+  };
+
   return (
     <div>
       <p className="panel-title">Library · {samples.length} sounds</p>
+
+      <div className="ai-arrange">
+        <p className="panel-title">AI arrange</p>
+        <p className="sample-meta">
+          Describe a vibe — Grok builds a session from the kit (drums, bass, leads, FX).
+        </p>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="e.g. metal + dubstep drop with wobble bass"
+          aria-label="Track description"
+        />
+        <div className="ai-chip-row">
+          {PROMPT_EXAMPLES.map((ex) => (
+            <button key={ex} type="button" className="chip" onClick={() => setPrompt(ex)}>
+              {ex}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className={`btn btn-primary ${arranging ? 'generating' : ''}`}
+          disabled={arranging || !prompt.trim() || ttsConfigured === false}
+          onClick={() => void generateArrangement()}
+        >
+          {arranging ? 'Arranging…' : 'Generate arrangement'}
+        </button>
+        {ttsConfigured === false && (
+          <p className="sample-meta">Needs <code>XAI_API_KEY</code> for AI arrange.</p>
+        )}
+        {arrangeError && <div className="hint-box">{arrangeError}</div>}
+      </div>
 
       <div
         className={`upload-zone ${dragOver ? 'dragover' : ''}`}

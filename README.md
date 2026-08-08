@@ -24,7 +24,7 @@ Projects/sessions save in the **browser (IndexedDB)** — no database required.
 
 Env vars:
 
-- `XAI_API_KEY` — AI lyrics + stock accent TTS  
+- `XAI_API_KEY` — AI lyrics, stock accent TTS, and **AI arrange** (describe a track → kit session)  
 - `XAI_MODEL` — optional (default `grok-3`)  
 - `ELEVENLABS_API_KEY` — Instant Voice Cloning + speak-in-your-voice TTS  
 - `ELEVENLABS_API_BASE` — optional (default `https://api.elevenlabs.io`)  
@@ -40,6 +40,11 @@ npm run deploy:party
 Copy the printed `*.workers.dev` host into Vercel as `VITE_PARTYKIT_HOST` (no `https://`), then redeploy the frontend.
 
 Uses free Durable Objects (`new_sqlite_classes`) via PartyServer.
+
+## Features
+
+- **Themes** — dark/light mode + accent color (lime/amber/cyan/magenta/custom), persisted in `localStorage`
+- **AI arrange** — Samples panel → describe a track; Grok places kit samples on the timeline (`XAI_API_KEY`). Optional vocal via TTS when configured
 
 ## Stack
 

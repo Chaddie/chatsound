@@ -1,7 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStudio } from '../store/studioStore';
 import { CollabBar } from './CollabBar';
 import logoUrl from '../assets/logo.png';
+import {
+  ACCENT_PRESETS,
+  applyTheme,
+  loadTheme,
+  type AccentId,
+  type ThemeMode,
+  type ThemeState,
+} from '../lib/theme';
 
 export function Header() {
   const projectName = useStudio((s) => s.projectName);
@@ -16,6 +24,15 @@ export function Header() {
   const switchSession = useStudio((s) => s.switchSession);
   const removeSession = useStudio((s) => s.removeSession);
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeState>(() => loadTheme());
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  const setMode = (mode: ThemeMode) => setTheme((t) => ({ ...t, mode }));
+  const setAccent = (accentId: AccentId) => setTheme((t) => ({ ...t, accentId }));
 
   return (
     <header className="header">
@@ -40,7 +57,10 @@ export function Header() {
           <button
             type="button"
             className="btn"
-            onClick={() => setSessionsOpen((v) => !v)}
+            onClick={() => {
+              setSessionsOpen((v) => !v);
+              setThemeOpen(false);
+            }}
             title="Saved sessions in this browser"
           >
             Library
@@ -52,10 +72,14 @@ export function Header() {
               <ul className="session-list">
                 {sessions.map((s) => (
                   <li key={s.id} className={s.id === sessionId ? 'active' : ''}>
-                    <button type="button" className="session-pick" onClick={() => {
-                      void switchSession(s.id);
-                      setSessionsOpen(false);
-                    }}>
+                    <button
+                      type="button"
+                      className="session-pick"
+                      onClick={() => {
+                        void switchSession(s.id);
+                        setSessionsOpen(false);
+                      }}
+                    >
                       <strong>{s.name}</strong>
                       <span>{new Date(s.updatedAt).toLocaleString()}</span>
                     </button>
@@ -88,6 +112,64 @@ export function Header() {
 
       <div className="header-meta">
         {statusMessage && <div className="status-pill">{statusMessage}</div>}
+        <div className="theme-wrap">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setThemeOpen((v) => !v);
+              setSessionsOpen(false);
+            }}
+            title="Theme & accent"
+          >
+            {theme.mode === 'dark' ? 'Dark' : 'Light'}
+          </button>
+          {themeOpen && (
+            <div className="theme-popover">
+              <p className="panel-title">Appearance</p>
+              <div className="theme-mode">
+                <button
+                  type="button"
+                  className={`btn ${theme.mode === 'dark' ? 'btn-primary' : ''}`}
+                  onClick={() => setMode('dark')}
+                >
+                  Dark
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${theme.mode === 'light' ? 'btn-primary' : ''}`}
+                  onClick={() => setMode('light')}
+                >
+                  Light
+                </button>
+              </div>
+              <p className="sample-meta">Accent</p>
+              <div className="theme-row">
+                {ACCENT_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`swatch ${theme.accentId === p.id ? 'on' : ''}`}
+                    style={{ background: p.hex }}
+                    title={p.label}
+                    aria-label={p.label}
+                    onClick={() => setAccent(p.id)}
+                  />
+                ))}
+                <input
+                  type="color"
+                  className={`swatch-custom ${theme.accentId === 'custom' ? 'on' : ''}`}
+                  value={theme.customHex}
+                  title="Custom accent"
+                  aria-label="Custom accent"
+                  onChange={(e) =>
+                    setTheme((t) => ({ ...t, accentId: 'custom', customHex: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+          )}
+        </div>
         <CollabBar />
         <button type="button" className="btn" onClick={addTrack}>
           + Track
