@@ -3,7 +3,7 @@ import type { Clip, LoopRegion, ProjectSnapshot, Sample, Track } from '../types'
 import { TRACK_COLORS, uid } from '../types';
 import { secondsToBeats, snapBeat, clamp } from '../lib/time';
 import { audioEngine } from '../engine/AudioEngine';
-import { loadProject, loadSampleBlobs, saveProject, saveSampleBlobs } from '../lib/idb';
+import { loadProject, loadSampleBlobs, saveProject, saveSampleBlobs, ensureActiveSession, listSessions, createSession, deleteSession, setActiveSessionId, type SessionMeta } from '../lib/idb';
 
 const BUNDLED: { id: string; name: string; file: string; category: string }[] = [
   // Drums
@@ -112,6 +112,8 @@ const HISTORY_MAX = 60;
 
 interface StudioState {
   hydrated: boolean;
+  sessionId: string | null;
+  sessions: SessionMeta[];
   projectName: string;
   bpm: number;
   playing: boolean;
@@ -138,6 +140,11 @@ interface StudioState {
   future: ArrSnapshot[];
 
   hydrate: () => Promise<void>;
+  refreshSessions: () => Promise<void>;
+  newSession: () => Promise<void>;
+  switchSession: (id: string) => Promise<void>;
+  removeSession: (id: string) => Promise<void>;
+  setProjectName: (name: string) => void;
   setBpm: (bpm: number) => void;
   setPxPerBeat: (v: number) => void;
   setSnap: (snap: number) => void;
@@ -204,6 +211,8 @@ function schedulePersist(get: () => StudioState) {
 
 export const useStudio = create<StudioState>((set, get) => ({
   hydrated: false,
+  sessionId: null,
+  sessions: [],
   projectName: 'Untitled Session',
   bpm: 128,
   playing: false,
@@ -226,6 +235,11 @@ export const useStudio = create<StudioState>((set, get) => ({
   recordStartBeat: 0,
   past: [],
   future: [],
+
+  setProjectName: (name) => {
+    set({ projectName: name.slice(0, 64) || 'Untitled Session' });
+    schedulePersist(get);
+  },
 
   setBpm: (bpm) => {
     const v = clamp(bpm, 40, 240);
@@ -311,7 +325,6 @@ export const useStudio = create<StudioState>((set, get) => ({
       samples: { id: string; file: string; duration: number; peaks: number[] }[];
     };
 
-    // Probe AI key in parallel with sample boot (non-blocking for UI).
     void fetch('/api/health')
       .then((r) => r.json())
       .then(
@@ -329,13 +342,15 @@ export const useStudio = create<StudioState>((set, get) => ({
       )
       .catch(() => set({ ttsConfigured: false, cloneConfigured: false }));
 
-    // Fast path: one JSON fetch + IndexedDB — no Tone unlock, no WAV decode
+    const { sessionId, meta } = await ensureActiveSession();
+    const sessions = await listSessions();
+
     const [manifest, savedProject, savedSamples] = await Promise.all([
       fetch('/samples/manifest.json')
         .then((r) => (r.ok ? (r.json() as Promise<Manifest>) : null))
         .catch(() => null),
-      loadProject(),
-      loadSampleBlobs(),
+      loadProject(sessionId),
+      loadSampleBlobs(sessionId),
     ]);
 
     const metaByFile = new Map(
@@ -343,13 +358,13 @@ export const useStudio = create<StudioState>((set, get) => ({
     );
 
     const bundled: Sample[] = BUNDLED.map((b) => {
-      const meta = metaByFile.get(b.file);
+      const m = metaByFile.get(b.file);
       return {
         id: b.id,
         name: b.name,
         url: `/samples/${b.file}`,
-        duration: meta?.duration ?? 0.5,
-        peaks: meta?.peaks ?? [],
+        duration: m?.duration ?? 0.5,
+        peaks: m?.peaks ?? [],
         source: 'bundled' as const,
         category: b.category,
       };
@@ -362,24 +377,33 @@ export const useStudio = create<StudioState>((set, get) => ({
     }
     for (const s of bundled) byId.set(s.id, s);
 
-    if (savedProject) {
-      set({
-        hydrated: true,
-        projectName: savedProject.name,
-        bpm: savedProject.bpm,
-        tracks: savedProject.tracks,
-        clips: savedProject.clips,
-        loop: savedProject.loop,
-        selectedTrackId: savedProject.selectedTrackId,
-        selectedClipId: savedProject.selectedClipId,
-        samples: [...byId.values()],
-      });
-    } else {
-      set({ hydrated: true, samples: [...byId.values()] });
-    }
+    const tracks =
+      savedProject?.tracks?.length ? savedProject.tracks : defaultTracks();
+    const selectedTrackId =
+      savedProject?.selectedTrackId && tracks.some((t) => t.id === savedProject.selectedTrackId)
+        ? savedProject.selectedTrackId
+        : tracks[0]?.id ?? null;
 
-    // Warm only samples used on the timeline (background, no Tone.start)
-    const needed = new Set((savedProject?.clips ?? get().clips).map((c) => c.sampleId));
+    set({
+      hydrated: true,
+      sessionId,
+      sessions,
+      projectName: savedProject?.name ?? meta.name,
+      bpm: savedProject?.bpm ?? 128,
+      tracks,
+      clips: savedProject?.clips ?? [],
+      loop: savedProject?.loop ?? { enabled: false, startBeat: 0, endBeat: 16 },
+      selectedTrackId,
+      selectedClipId: savedProject?.selectedClipId ?? null,
+      samples: [...byId.values()],
+      playing: false,
+      positionBeat: 0,
+      past: [],
+      future: [],
+      statusMessage: savedProject ? `Restored “${savedProject.name}”` : 'Session ready',
+    });
+
+    const needed = new Set((savedProject?.clips ?? []).map((c) => c.sampleId));
     if (needed.size) {
       void (async () => {
         try {
@@ -391,6 +415,46 @@ export const useStudio = create<StudioState>((set, get) => ({
         }
       })();
     }
+  },
+
+  refreshSessions: async () => {
+    set({ sessions: await listSessions() });
+  },
+
+  newSession: async () => {
+    await get().persist();
+    audioEngine.stop();
+    const created = await createSession('Untitled Session');
+    set({ sessionId: created.id, hydrated: false, playing: false, positionBeat: 0 });
+    await get().hydrate();
+    get().setStatus('New session');
+  },
+
+  switchSession: async (id) => {
+    if (id === get().sessionId) return;
+    await get().persist();
+    audioEngine.stop();
+    await setActiveSessionId(id);
+    set({ sessionId: id, hydrated: false, playing: false, positionBeat: 0 });
+    await get().hydrate();
+  },
+
+  removeSession: async (id) => {
+    const list = get().sessions;
+    if (list.length <= 1) {
+      get().setStatus('Keep at least one session');
+      return;
+    }
+    const wasActive = get().sessionId === id;
+    await deleteSession(id);
+    if (wasActive) {
+      audioEngine.stop();
+      set({ hydrated: false, playing: false, positionBeat: 0 });
+      await get().hydrate();
+    } else {
+      await get().refreshSessions();
+    }
+    get().setStatus('Session deleted');
   },
 
   play: async () => {
@@ -678,6 +742,7 @@ export const useStudio = create<StudioState>((set, get) => ({
 
   persist: async () => {
     const s = get();
+    if (!s.sessionId) return;
     const snap: ProjectSnapshot = {
       version: 1,
       name: s.projectName,
@@ -688,8 +753,9 @@ export const useStudio = create<StudioState>((set, get) => ({
       selectedTrackId: s.selectedTrackId,
       selectedClipId: s.selectedClipId,
     };
-    await saveProject(snap);
-    await saveSampleBlobs(s.samples);
+    await saveProject(s.sessionId, snap);
+    await saveSampleBlobs(s.sessionId, s.samples);
+    await get().refreshSessions();
   },
 
   exportWav: async () => {

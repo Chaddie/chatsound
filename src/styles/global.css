@@ -74,15 +74,32 @@ button {
 
 .brand {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.65rem;
   line-height: 0.9;
   user-select: none;
 }
 
+.brand-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 0.9;
+}
+
 .brand-mark {
   font-family: var(--font-display);
-  font-size: 2rem;
-  letter-spacing: 0.04em;
+  font-size: 1.65rem;
+  letter-spacing: 0.06em;
   color: var(--lime);
   text-shadow: 0 0 24px rgba(200, 241, 53, 0.25);
 }
@@ -93,6 +110,87 @@ button {
   color: var(--muted);
   letter-spacing: 0.16em;
   text-transform: uppercase;
+}
+
+.session-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.session-menu-wrap {
+  position: relative;
+}
+
+.session-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: min(320px, 80vw);
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(28, 31, 38, 0.98), rgba(16, 18, 24, 0.99));
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.session-list li {
+  display: flex;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+
+.session-list li.active .session-pick {
+  border-color: var(--lime);
+  background: rgba(200, 241, 53, 0.08);
+}
+
+.session-pick {
+  flex: 1;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text);
+  padding: 0.45rem 0.55rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.session-pick strong {
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-pick span {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+
+.session-del {
+  padding: 0 0.55rem;
 }
 
 .header-meta {
@@ -747,6 +845,8 @@ button {
 }
 
 .boot-logo {
+  width: 72px;
+  height: 72px;
   animation: boot-logo-in 500ms cubic-bezier(0.2, 0.85, 0.2, 1) both;
 }
 

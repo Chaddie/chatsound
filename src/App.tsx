@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Studio } from './components/Studio';
 import { useStudio, startPositionClock } from './store/studioStore';
 import { wireCollabToStudio } from './collab/store';
+import logoUrl from './assets/logo.png';
 
 export default function App() {
   const hydrate = useStudio((s) => s.hydrate);
@@ -11,9 +12,18 @@ export default function App() {
     void hydrate();
     const stopClock = startPositionClock();
     const unwire = wireCollabToStudio();
+    const flush = () => {
+      void useStudio.getState().persist();
+    };
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
+    });
     return () => {
       stopClock();
       unwire();
+      window.removeEventListener('beforeunload', flush);
+      flush();
     };
   }, [hydrate]);
 
@@ -72,8 +82,9 @@ export default function App() {
       <div className="boot-screen">
         <div className="boot-glow" aria-hidden />
         <div className="boot-card">
-          <div className="brand" style={{ alignItems: 'center' }}>
-            <div className="brand-mark boot-logo">CHADSOUND</div>
+          <div className="brand" style={{ alignItems: 'center', flexDirection: 'column' }}>
+            <img className="brand-logo boot-logo" src={logoUrl} alt="Chad Sound" width={72} height={72} />
+            <div className="brand-mark">CHAD SOUND</div>
             <div className="brand-sub">Sample Lattice · Accent Vocals</div>
           </div>
           <div className="boot-eq" aria-hidden>
