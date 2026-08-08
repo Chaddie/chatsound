@@ -128,6 +128,8 @@ interface StudioState {
   leftTab: 'samples' | 'accent';
   exporting: boolean;
   statusMessage: string | null;
+  /** null = still checking; false = show setup hint; true = key present */
+  ttsConfigured: boolean | null;
   recording: boolean;
   recordStartBeat: number;
   past: ArrSnapshot[];
@@ -139,6 +141,7 @@ interface StudioState {
   setSnap: (snap: number) => void;
   setLeftTab: (tab: 'samples' | 'accent') => void;
   setStatus: (msg: string | null) => void;
+  setTtsConfigured: (ready: boolean | null) => void;
   applyRemoteSnapshot: (snap: ProjectSnapshot) => void;
   addCapturedSample: (
     name: string,
@@ -214,6 +217,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   leftTab: 'samples',
   exporting: false,
   statusMessage: null,
+  ttsConfigured: null,
   recording: false,
   recordStartBeat: 0,
   past: [],
@@ -232,6 +236,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   setSnap: (snap) => set({ snap }),
   setLeftTab: (tab) => set({ leftTab: tab }),
   setStatus: (msg) => set({ statusMessage: msg }),
+  setTtsConfigured: (ready) => set({ ttsConfigured: ready }),
   setRecording: (recording, startBeat) =>
     set({ recording, recordStartBeat: startBeat ?? get().positionBeat }),
 
@@ -300,6 +305,14 @@ export const useStudio = create<StudioState>((set, get) => ({
     type Manifest = {
       samples: { id: string; file: string; duration: number; peaks: number[] }[];
     };
+
+    // Probe AI key in parallel with sample boot (non-blocking for UI).
+    void fetch('/api/health')
+      .then((r) => r.json())
+      .then((d: { ttsConfigured?: boolean }) => {
+        set({ ttsConfigured: Boolean(d.ttsConfigured) });
+      })
+      .catch(() => set({ ttsConfigured: false }));
 
     // Fast path: one JSON fetch + IndexedDB — no Tone unlock, no WAV decode
     const [manifest, savedProject, savedSamples] = await Promise.all([

@@ -32,7 +32,6 @@ export function AccentStudio() {
   const [lyricStyle, setLyricStyle] = useState<LyricStyle>('rap');
   const [lyrics, setLyrics] = useState('');
   const [busy, setBusy] = useState<'lyrics' | 'voice' | 'clone' | null>(null);
-  const [ttsReady, setTtsReady] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Clone UI
@@ -55,6 +54,7 @@ export function AccentStudio() {
   const selectedTrackId = useStudio((s) => s.selectedTrackId);
   const positionBeat = useStudio((s) => s.positionBeat);
   const setStatus = useStudio((s) => s.setStatus);
+  const ttsConfigured = useStudio((s) => s.ttsConfigured);
   const tracks = useStudio((s) => s.tracks);
 
   const customPresets = customVoices.map(customVoiceToPreset);
@@ -63,10 +63,6 @@ export function AccentStudio() {
 
   useEffect(() => {
     void loadCustomVoices().then(setCustomVoices);
-    void fetch('/api/health')
-      .then((r) => r.json())
-      .then((d: { ttsConfigured?: boolean }) => setTtsReady(Boolean(d.ttsConfigured)))
-      .catch(() => setTtsReady(false));
 
     return () => {
       void recorderRef.current.stop();
@@ -295,10 +291,11 @@ export function AccentStudio() {
     <div className="accent-form">
       <p className="panel-title">Accent Studio · Grok</p>
 
-      {ttsReady === false && (
+      {ttsConfigured === false && (
         <div className="hint-box">
-          Add your xAI key to unlock AI lyrics, vocals, and voice clone. Copy <code>.env.example</code> →{' '}
-          <code>.env</code>, set <code>XAI_API_KEY</code>, restart the API.
+          Add your xAI key to unlock AI lyrics, vocals, and voice clone. Set{' '}
+          <code>XAI_API_KEY</code> in Vercel env (hosted) or local <code>.env</code>, then restart /
+          redeploy.
         </div>
       )}
 
